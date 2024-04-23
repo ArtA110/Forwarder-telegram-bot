@@ -1,7 +1,9 @@
+import html
+import json
+import traceback
 import logging
-import requests
-from collections import OrderedDict
 from typing import Final
+from telegram.constants import ParseMode
 from hashlib import sha256
 from pymongo import MongoClient
 from telegram import (InlineQueryResultArticle, InlineQueryResultPhoto, InputTextMessageContent, Update,
@@ -16,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 CHANNEL_ID: Final = -1001760329506
-TOKEN: Final = '6777553545:AAFmGKGc1mqUORYJh9s4fRRaB4tXd7jJj8c'
+TOKEN: Final = '7184154589:AAFQqdW5am7S6L6w5l7YC4mSieKCbp7Pq7w'
 # Connect to database
 client = MongoClient('localhost', 27017)
 db = client['TelegramBot']
@@ -27,21 +29,30 @@ files_collection = db['files']
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = '\n\nبه بات تلگرامی شیخیه باقری خوش آمدید، برای ادامه لطفا یکی از آپشن های زیر را انتخاب کنید.\n\n'
+    text += '\n\nبرای دیدن لیست کامل دستورات و راهنمایی لطفا برروی /help بزنید\n\n'
     options = ['/login برای ورود به اکانت', '/ticket برای درخواست پشتیبانی']
     text += '\n'.join(options)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
 
-USERNAME, PASSWORD = range(2)
-REGISTER = 0
-STATE0, STATE1, STATE2 = range(3)
 
-async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with open('help.txt', 'rb') as f:
+        byte_string = f.read()
+        text = byte_string.decode('UTF-8')
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+
+USERNAME, PASSWORD, SET_PASS = range(3)
+REGISTER = 0
+STATE0, STATE1, STATE2, PAGINATION = range(4)
+
+
+async def forward_audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_chat.id):
         await context.bot.send_message(chat_id=update.effective_chat.id, text='ابتدا باید /login کنید')
         return ConversationHandler.END
 
-    all_topics = {'اصول فقه': 'osool', 'تذکره': 'tazkare', 'دره نجفیه': 'dorre', 'رجوم الشیاطین': 'rojoom',
-                  'رساله غیبت': 'gheibat', 'سلطانیه': 'soltanieh', 'شرایط دعا': 'doa', 'قرآن محشی': 'mohassha',
+    all_topics = {'اصول فقه': 'osool', 'تذکره': 'tazkareh', 'دره نجفیه': 'dorre', 'رجوم الشیاطین': 'rojoom',
+                  'رساله غیبت': 'gheibat', 'سلطانیه': 'soltanieh', 'شرایط دعا': 'Doa', 'قرآن محشی': 'mohassha',
                   'متفرقه': 'others', 'معادیه': "ma'adieh", 'معرفت سر اختیار': 'marefat', 'منطق': 'mantegh',
                   'مواعظ 1292': 'mavaez', 'میزان': 'mizan'}
 
@@ -58,7 +69,7 @@ async def button1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['query_item'].append(query.data)
     search_result = sort_result(list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
     sub_menu = {}
-    if len(search_result[1]['file_name'].split('-')) > 2:
+    if len(search_result[0]['file_name'].split('-')) > 2:
         all_topics = {'سوره بقره': 'baghareh', 'سوره حمد': 'hamd', 'سوره اخلاص': 'ekhlas', 'جزء سی': 'jozv30',
                   'فخر رازی': 'FakhrRazi', 'تفتازانی': 'Taftazani', 'مقدمه': 'moghadame', 'جلد اول': '1',
                   'جلد دوم': '2', 'سال 1992': '92'}
@@ -69,6 +80,12 @@ async def button1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         for result in search_result:
             sub_menu[result['title']] = result['file_name']
+    if len(sub_menu) > 100:
+        text = (
+            'به دلیل زیاد بودن مباحث در این بخش لطفا شماره فایل مورد نظر را وارد کنید\n\n مثلا در تذکره شماره 100 به '
+            'معنی فایل صدم میباشد')
+        await query.edit_message_text(text=text)
+        return PAGINATION
     reply_markup = InlineKeyboardMarkup(create_menu(name_dict=sub_menu))
     await query.edit_message_text(text=f'you choose: {query.data}', reply_markup=reply_markup)
     return STATE1
@@ -76,7 +93,6 @@ async def button1(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    # {"$regex": f"^{'-'.join(context.user_data['query_item'])}"}
     context.user_data['query_item'].append(query.data)
     if '.mp3' in query.data:
         search_result = sort_result(list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
@@ -95,16 +111,31 @@ async def button2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STATE2
 
 
-
 async def button3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    context.user_data['query_item'].append(query.data)
     search_result = sort_result(
         list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
     await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=search_result[0]['message_id'])
     await query.edit_message_text(text='File Sent Successfully')
     return ConversationHandler.END
+
+
+async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file_name = context.user_data['query_item'][-1]+'-'+update.message.text
+    results = files_collection.find({"file_name": {"$regex": f'^{file_name}\.'}})
+    for result in results:
+        print(file_name)
+        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=result['message_id'])
+    return ConversationHandler.END
+
+
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    await query.edit_message_text(text='نشست شما در این فراخوانی به پایان رسیده لطفا مجددا دستور دریافت فایل را وارد '
+                                       'کنید')
+
 
 def sort_result(result):
     try:
@@ -157,6 +188,12 @@ async def login_password_handler(update: Update, context: ContextTypes.DEFAULT_T
     user = users_collection.find_one({'username': username})
     if user:
         context.user_data['username'] = username
+        if user['password']==None:
+            text = 'لطفا برای خود رمزی تعیین کنید:'
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                           reply_to_message_id=update.effective_message.message_id)
+            return SET_PASS
+
         text = 'لطفا کلمه عبور خود را وارد کنید.'
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
                                        reply_to_message_id=update.effective_message.message_id)
@@ -173,11 +210,25 @@ async def login_check_user_handler(update: Update, context: ContextTypes.DEFAULT
     user = users_collection.find_one({'username': context.user_data['username'], "password": password})
     if user:
         text = 'شما با موفقیت وارد شدید'
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
-                                       reply_to_message_id=update.effective_message.message_id)
-        logged_in_collection.insert_one({'chat_id': update.effective_chat.id})
+        logged_in_collection.insert_one({'chat_id': update.effective_chat.id,
+                                         'username': context.user_data['username']})
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+        await context.bot.delete_message(chat_id=update.effective_chat.id,
+                                         message_id=update.effective_message.message_id)
         return ConversationHandler.END
     text = 'رمز عبور اشتباه است مجددا با دستور /login وارد شوید'
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                   reply_to_message_id=update.effective_message.message_id)
+    return ConversationHandler.END
+
+
+async def login_set_password_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    password = update.message.text
+    password = sha256(password.encode('utf-8')).hexdigest()
+    users_collection.find_one_and_update({'username': context.user_data['username']},
+                                         {'$set': {'password': password}})
+    logged_in_collection.insert_one({'chat_id': update.effective_chat.id, 'username': context.user_data['username']})
+    text = 'شما با موفقیت وارد شدید'
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
                                    reply_to_message_id=update.effective_message.message_id)
     return ConversationHandler.END
@@ -190,6 +241,25 @@ async def login_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+async def register_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = 'عملیات ثبت نام لغو شد!'
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                   reply_to_message_id=update.effective_message.message_id)
+    return ConversationHandler.END
+
+
+async def audio_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = 'عملیات لغو شد!'
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                   reply_to_message_id=update.effective_message.message_id)
+    return ConversationHandler.END
+
+
+async def ticket_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = 'عملیات درخواست پشتیبانی لغو شد!'
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
+                                   reply_to_message_id=update.effective_message.message_id)
+    return ConversationHandler.END
 async def logout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_authorized(update.effective_chat.id):
         logged_in_collection.delete_one({'chat_id': update.effective_chat.id})
@@ -199,29 +269,37 @@ async def logout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=update.effective_chat.id, text='شما اصلا وارد نشده اید!',
                                        reply_to_message_id=update.effective_message.id)
 
+
 async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = context.args[0]
-    if code == '48022125':  # should save to file or environment variable
-        text = '\n\nلطفا با فرم زیر نام کاربری و رمز عبور خودرا وارد کنید\n\n'
-        text += 'username_example:password_example\n\n'
-        text += '\n\nمثلا اگر نام کاربری ali و رمز عبور 123 میباشد باید مانند زیر عمل کنید\n\n'
-        text += 'ali:123'
+    chat_id = update.effective_chat.id
+    user = logged_in_collection.find_one({'chat_id': chat_id})
+    if user:
+        username = user['username']
+    else:
+        await context.bot.send_message(chat_id=chat_id, text='ابتدا وارد شوید!',
+                                       reply_to_message_id=update.effective_message.id)
+        return ConversationHandler.END
+    if users_collection.find_one({'username': username})['is_admin'] == 1:  # should save to file or environment variable
+        text = '\n\nلطفا با فرم زیر نام کاربری و دسترسی ادمین بودن را (با صفر یا یک) وارد کنید\n\n'
+        text += 'username_example:admin_status\n\n'
+        text += '\n\nمثلا اگر نام کاربری ali میباشد و کاربر غیر ادمین است از دستور زیر باید استفاده شود\n\n'
+        text += 'ali:0'
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
         return REGISTER
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='شما مجاز به ثبت نام نیستید')
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='شما مجاز به ثبت نام شخص دیگری نیستید')
 
 
 async def register_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if len(update.message.text.split(':')) != 2:
+        if len(update.message.text.split(':')) != 2 or update.message.text.split(':')[1] not in ['0', '1']:
             raise Exception('Error - Check your input format')
-        username, password = update.message.text.split(':')
-        password = sha256(password.encode('utf-8')).hexdigest()
+        username, is_admin = update.message.text.split(':')
         if users_collection.find_one({'username': username}):
             raise Exception('User already exists')
-        users_collection.insert_one({'username': username, 'password': password})
+        users_collection.insert_one({'username': username, 'password': None, 'is_admin': int(is_admin)})
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f'کاربر با موفقیت ایجاد شد!')
     except Exception as e:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=str(e))
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=str(e)+'\ntry again with /register')
     return ConversationHandler.END
 
 
@@ -241,8 +319,37 @@ async def ticket_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
-async def forward_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.effective_chat.forward_from(from_chat_id=-1001760329506, message_id=5)
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+    tb_string = "".join(tb_list)
+
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+
+    logs = json.dumps(update_str)
+    logs = json.loads(logs)
+    c_id = logs['message']['chat']['id']
+    await context.bot.send_message(chat_id=c_id, text='Error - Unhandled Exception Occurred, details sent to developer')
+    # Finally, send the message
+    await context.bot.send_message(
+        chat_id=110908059, text=message, parse_mode=ParseMode.HTML
+    )
+
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
@@ -251,33 +358,37 @@ if __name__ == '__main__':
     login = ConversationHandler(
         entry_points=[CommandHandler('login', login_handler)],
         states={USERNAME: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_password_handler)],
-                PASSWORD: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_check_user_handler)]},
+                PASSWORD: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_check_user_handler)],
+                SET_PASS: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_set_password_handler)]},
         fallbacks=[CommandHandler('cancel', login_cancel_handler)]
     )
 
     register = ConversationHandler(
         entry_points=[CommandHandler('register', register_handler)],
         states={REGISTER: [MessageHandler(filters.TEXT & ~ filters.COMMAND, register_info_handler)]},
-        fallbacks=[CommandHandler('cancel', login_cancel_handler)]
+        fallbacks=[CommandHandler('cancel', register_cancel_handler)]
     )
 
     ticket = ConversationHandler(
         entry_points=[CommandHandler('ticket', ticket_handler)],
         states={TICKET: [MessageHandler(filters.TEXT & ~ filters.COMMAND, ticket_info_handler)]},
-        fallbacks=[CommandHandler('cancel', login_cancel_handler)]
+        fallbacks=[CommandHandler('cancel', ticket_cancel_handler)]
     )
 
     audio = ConversationHandler(
-        entry_points=[CommandHandler('test', test)],
+        entry_points=[CommandHandler('audio', forward_audio_handler)],
         states={STATE0: [CallbackQueryHandler(button1)],
                 STATE1: [CallbackQueryHandler(button2)],
-                STATE2: [CallbackQueryHandler(button3)]},
-        fallbacks=[CommandHandler('cancel', login_cancel_handler)]
+                STATE2: [CallbackQueryHandler(button3)],
+                PAGINATION: [MessageHandler(filters.TEXT & ~ filters.COMMAND, pagination_handler)]},
+        fallbacks=[CommandHandler('cancel', audio_cancel_handler)]
     )
     application.add_handler(login)
     application.add_handler(register)
     application.add_handler(ticket)
     application.add_handler(audio)
+    application.add_handler(CallbackQueryHandler(cancel_callback))
     application.add_handler(CommandHandler('logout', logout_handler))
-    application.add_handler(CommandHandler('forward', forward_handler))
+    application.add_handler(CommandHandler('help', help_handler))
+    application.add_error_handler(error_handler)
     application.run_polling()
