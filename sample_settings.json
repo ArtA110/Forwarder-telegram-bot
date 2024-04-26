@@ -1,0 +1,6 @@
+[{"channel_id": "Your channel id -> int",
+"token": "6777553545:AAFmGKGc1mqUORYJh9s4fRRaB4tXd7jJj8c",
+"test_bot_id": "@ArtA_1stTest_bot",
+"mongo_uri":"you can use localhost",
+"developer_id": "Your ID"
+}]

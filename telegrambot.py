@@ -2,6 +2,8 @@ import html
 import json
 import traceback
 import logging
+import socket
+import threading
 from typing import Final
 from telegram.constants import ParseMode
 from hashlib import sha256
@@ -10,21 +12,47 @@ from telegram import (InlineQueryResultArticle, InlineQueryResultPhoto, InputTex
                       InlineKeyboardMarkup, InlineKeyboardButton)
 from telegram.ext import (ApplicationBuilder, ContextTypes, InlineQueryHandler, CommandHandler, filters, MessageHandler,
                           ConversationHandler, CallbackQueryHandler)
-from uuid import uuid4
+
+
+settings = open("settings.json", "r") #chage this to open("sample_settings.json", "r") for your test
+settings = json.load(settings)
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-CHANNEL_ID: Final = -1001760329506
-TOKEN: Final = '7184154589:AAFQqdW5am7S6L6w5l7YC4mSieKCbp7Pq7w'
+CHANNEL_ID: Final = settings['channel_id']
+TOKEN: Final = settings['token']
 # Connect to database
-client = MongoClient('localhost', 27017)
+client = MongoClient(settings['mongo_uri'])
 db = client['TelegramBot']
 users_collection = db['users']
 logged_in_collection = db['logged_in']
 files_collection = db['files']
+
+
+def handle_client(client_socket):
+    # Handle incoming client connections here
+    data = client_socket.recv(1024)
+    # Process the data received from the client
+    print(f"Received data: {data.decode()}")
+    client_socket.close()
+
+
+def run_tcp_server():
+    HOST = '0.0.0.0'  # Listen on all available interfaces
+    PORT = 8000  # Choose a port number for your TCP server
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((HOST, PORT))
+        server_socket.listen()
+
+        print(f"TCP Server listening on {HOST}:{PORT}")
+
+        while True:
+            client_socket, _ = server_socket.accept()
+            handle_client(client_socket)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54,12 +82,13 @@ async def forward_audio_handler(update: Update, context: ContextTypes.DEFAULT_TY
     all_topics = {'اصول فقه': 'osool', 'تذکره': 'tazkareh', 'دره نجفیه': 'dorre', 'رجوم الشیاطین': 'rojoom',
                   'رساله غیبت': 'gheibat', 'سلطانیه': 'soltanieh', 'شرایط دعا': 'Doa', 'قرآن محشی': 'mohassha',
                   'متفرقه': 'others', 'معادیه': "ma'adieh", 'معرفت سر اختیار': 'marefat', 'منطق': 'mantegh',
-                  'مواعظ 1292': 'mavaez', 'میزان': 'mizan'}
+                  'مواعظ': 'mavaez', 'میزان': 'mizan'}
 
     response = create_menu(name_dict=all_topics)
     reply_markup = InlineKeyboardMarkup(response)
     context.user_data['query_item'] = []
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='Test', reply_markup=reply_markup)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='لطفا از فهرست پایین یک مورد را انتخاب کنید',
+                                   reply_markup=reply_markup)
     return STATE0
 
 
@@ -153,7 +182,7 @@ def create_menu(count: int=None, name_dict: dict=None):
                 response.append([InlineKeyboardButton(key, callback_data=value)])
             else:
                 response[i // 2].append(InlineKeyboardButton(key, callback_data=value))
-            i+=1
+            i += 1
     elif count is not None:
         for i in range(count):
             if i % 2 == 0:
@@ -185,7 +214,7 @@ async def login_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def login_password_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.text
-    user = users_collection.find_one({'username': username})
+    user = users_collection.find_one({'username': username.lower()})
     if user:
         context.user_data['username'] = username
         if user['password']==None:
@@ -207,7 +236,7 @@ async def login_password_handler(update: Update, context: ContextTypes.DEFAULT_T
 async def login_check_user_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     password = update.message.text
     password = sha256(password.encode('utf-8')).hexdigest()
-    user = users_collection.find_one({'username': context.user_data['username'], "password": password})
+    user = users_collection.find_one({'username': context.user_data['username'].lower(), "password": password})
     if user:
         text = 'شما با موفقیت وارد شدید'
         logged_in_collection.insert_one({'chat_id': update.effective_chat.id,
@@ -279,7 +308,7 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text='ابتدا وارد شوید!',
                                        reply_to_message_id=update.effective_message.id)
         return ConversationHandler.END
-    if users_collection.find_one({'username': username})['is_admin'] == 1:  # should save to file or environment variable
+    if users_collection.find_one({'username': username})['is_admin'] == 1:
         text = '\n\nلطفا با فرم زیر نام کاربری و دسترسی ادمین بودن را (با صفر یا یک) وارد کنید\n\n'
         text += 'username_example:admin_status\n\n'
         text += '\n\nمثلا اگر نام کاربری ali میباشد و کاربر غیر ادمین است از دستور زیر باید استفاده شود\n\n'
@@ -314,7 +343,7 @@ async def ticket_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.effective_chat.id
     username = update.effective_chat.username
     text = f'{chat_id=}, {username=}, \n{message=}'
-    await context.bot.send_message(chat_id=110908059, text=text)
+    await context.bot.send_message(chat_id=settings['developer_id'], text=text)
     await context.bot.send_message(chat_id=chat_id, text='پیام شما برای پشتیبان ارسال شد!')
     return ConversationHandler.END
 
@@ -341,17 +370,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         f"<pre>{html.escape(tb_string)}</pre>"
     )
 
-    logs = json.dumps(update_str)
-    logs = json.loads(logs)
-    c_id = logs['message']['chat']['id']
-    await context.bot.send_message(chat_id=c_id, text='Error - Unhandled Exception Occurred, details sent to developer')
+    try:
+        logs = json.dumps(update_str)
+        logs = json.loads(logs)
+        c_id = logs['message']['chat']['id']
+        await context.bot.send_message(chat_id=c_id, text='Error - Unhandled Exception Occurred, details sent to developer')
+    except:
+        await context.bot.send_message(chat_id=settings['developer_id'], text='Error Sending Message to Client')
     # Finally, send the message
     await context.bot.send_message(
-        chat_id=110908059, text=message, parse_mode=ParseMode.HTML
+        chat_id=settings['developer_id'], text=message, parse_mode=ParseMode.HTML
     )
 
-
-if __name__ == '__main__':
+def run_telegram_bot():
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler('start', start))
 
@@ -392,3 +423,10 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('help', help_handler))
     application.add_error_handler(error_handler)
     application.run_polling()
+
+
+if __name__ == "__main__":
+    tcp_server_thread = threading.Thread(target=run_tcp_server)
+    tcp_server_thread.start()
+    run_telegram_bot()
+
