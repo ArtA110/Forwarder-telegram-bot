@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 CHANNEL_ID: Final = settings[0]['channel_id']
-TOKEN: Final = settings[0]['token']
+TOKEN: Final = '6777553545:AAFmGKGc1mqUORYJh9s4fRRaB4tXd7jJj8c'
 # Connect to database
 client = MongoClient(settings[0]['mongo_uri'])
 db = client['TelegramBot']
@@ -199,7 +199,12 @@ def is_authorized(chat_id: int) -> bool:
 
 
 def is_admin(chat_id: int) -> bool:
-    pass
+    user = logged_in_collection.find_one({'chat_id': chat_id})
+    if user:
+        username = user['username']
+        if users_collection.find_one({'username': username})['is_admin']:
+            return True
+    return False
 
 async def login_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_authorized(update.effective_chat.id):
@@ -306,21 +311,14 @@ async def logout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    user = logged_in_collection.find_one({'chat_id': chat_id})
-    if user:
-        username = user['username']
-    else:
-        await context.bot.send_message(chat_id=chat_id, text='ابتدا وارد شوید!',
-                                       reply_to_message_id=update.effective_message.id)
-        return ConversationHandler.END
-    if users_collection.find_one({'username': username})['is_admin'] == 1:
+    if is_admin(chat_id):
         text = '\n\nلطفا با فرم زیر نام کاربری و دسترسی ادمین بودن را (با صفر یا یک) وارد کنید\n\n'
         text += 'username_example:admin_status\n\n'
         text += '\n\nمثلا اگر نام کاربری ali میباشد و کاربر غیر ادمین است از دستور زیر باید استفاده شود\n\n'
         text += 'ali:0'
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+        await context.bot.send_message(chat_id=chat_id, text=text)
         return REGISTER
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='شما مجاز به ثبت نام شخص دیگری نیستید')
+    await context.bot.send_message(chat_id=chat_id, text='شما مجاز به ثبت نام شخص دیگری نیستید')
 
 
 async def register_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -347,32 +345,35 @@ async def ticket_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     message = update.message.text
     chat_id = update.effective_chat.id
     username = update.effective_chat.username
-    text = f'{chat_id=}, {username=}, \n{message=}'
+    text = f'{chat_id=}, {username=}, \nmessage:\n{message}'
     await context.bot.send_message(chat_id=settings[0]['developer_id'], text=text)
     await context.bot.send_message(chat_id=chat_id, text='پیام شما برای پشتیبان ارسال شد!')
     return ConversationHandler.END
 
 
 async def push_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        mode = context.args[0]
-        message = update.message.text.split(" ")[2:]
-        message = ' '.join(message)
-    except:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text='bad arguments. try /push <mode> <message>')
-        return
-
-    if mode.lower() == 'public':
-        chats = logged_in_collection.find()
-        for chat in chats:
-            await context.bot.send_message(chat_id=int(chat['chat_id']), text=message)
-    else:
+    if is_admin(update.effective_chat.id):
         try:
-            await context.bot.send_message(chat_id=int(mode), text=message)
+            mode = context.args[0]
+            message = update.message.text.split(" ")[2:]
+            message = ' '.join(message)
         except:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text='bad chat id.')
+            await context.bot.send_message(chat_id=update.effective_chat.id, text='bad arguments. try /push <mode> <message>')
             return
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='Done!')
+
+        if mode.lower() == 'public':
+            chats = logged_in_collection.find()
+            for chat in chats:
+                await context.bot.send_message(chat_id=int(chat['chat_id']), text=message)
+        else:
+            try:
+                await context.bot.send_message(chat_id=int(mode), text=message)
+            except:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text='bad chat id.')
+                return
+        await context.bot.send_message(chat_id=update.effective_chat.id, text='Done!')
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text='شما حق استفاده از این دستور را ندارید')
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
