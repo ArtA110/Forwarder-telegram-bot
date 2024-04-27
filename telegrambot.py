@@ -22,10 +22,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-CHANNEL_ID: Final = settings['channel_id']
-TOKEN: Final = settings['token']
+CHANNEL_ID: Final = settings[0]['channel_id']
+TOKEN: Final = settings[0]['token']
 # Connect to database
-client = MongoClient(settings['mongo_uri'])
+client = MongoClient(settings[0]['mongo_uri'])
 db = client['TelegramBot']
 users_collection = db['users']
 logged_in_collection = db['logged_in']
@@ -162,7 +162,7 @@ async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    await query.edit_message_text(text='نشست شما در این فراخوانی به پایان رسیده لطفا مجددا دستور دریافت فایل را وارد '
+    await query.edit_message_text(text='نشست شما در این فراخوانی به پایان رسیده لطفا مجددا دستور را وارد '
                                        'کنید')
 
 
@@ -198,6 +198,9 @@ def is_authorized(chat_id: int) -> bool:
     return False
 
 
+def is_admin(chat_id: int) -> bool:
+    pass
+
 async def login_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_authorized(update.effective_chat.id):
         text = 'شما قبلا وارد شدید و میتوانید از امکانات استفاده کنید.'
@@ -213,8 +216,8 @@ async def login_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def login_password_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.message.text
-    user = users_collection.find_one({'username': username.lower()})
+    username = update.message.text.lower()
+    user = users_collection.find_one({'username': username})
     if user:
         context.user_data['username'] = username
         if user['password']==None:
@@ -260,6 +263,8 @@ async def login_set_password_handler(update: Update, context: ContextTypes.DEFAU
     text = 'شما با موفقیت وارد شدید'
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text,
                                    reply_to_message_id=update.effective_message.message_id)
+    await context.bot.delete_message(chat_id=update.effective_chat.id,
+                                     message_id=update.effective_message.message_id)
     return ConversationHandler.END
 
 
@@ -334,7 +339,7 @@ async def register_info_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 TICKET = 0
 async def ticket_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='لطفا مشکل خودرا در یک پیام با جزئبات توضیح دهید')
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='لطفا مشکل خودرا در یک پیام با جزئیات توضیح دهید')
     return TICKET
 
 
@@ -343,10 +348,31 @@ async def ticket_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.effective_chat.id
     username = update.effective_chat.username
     text = f'{chat_id=}, {username=}, \n{message=}'
-    await context.bot.send_message(chat_id=settings['developer_id'], text=text)
+    await context.bot.send_message(chat_id=settings[0]['developer_id'], text=text)
     await context.bot.send_message(chat_id=chat_id, text='پیام شما برای پشتیبان ارسال شد!')
     return ConversationHandler.END
 
+
+async def push_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        mode = context.args[0]
+        message = update.message.text.split(" ")[2:]
+        message = ' '.join(message)
+    except:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text='bad arguments. try /push <mode> <message>')
+        return
+
+    if mode.lower() == 'public':
+        chats = logged_in_collection.find()
+        for chat in chats:
+            await context.bot.send_message(chat_id=int(chat['chat_id']), text=message)
+    else:
+        try:
+            await context.bot.send_message(chat_id=int(mode), text=message)
+        except:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text='bad chat id.')
+            return
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='Done!')
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
@@ -376,10 +402,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         c_id = logs['message']['chat']['id']
         await context.bot.send_message(chat_id=c_id, text='Error - Unhandled Exception Occurred, details sent to developer')
     except:
-        await context.bot.send_message(chat_id=settings['developer_id'], text='Error Sending Message to Client')
+        await context.bot.send_message(chat_id=settings[0]['developer_id'], text='Error Sending Message to Client')
     # Finally, send the message
     await context.bot.send_message(
-        chat_id=settings['developer_id'], text=message, parse_mode=ParseMode.HTML
+        chat_id=settings[0]['developer_id'], text=message, parse_mode=ParseMode.HTML
     )
 
 def run_telegram_bot():
@@ -391,7 +417,7 @@ def run_telegram_bot():
         states={USERNAME: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_password_handler)],
                 PASSWORD: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_check_user_handler)],
                 SET_PASS: [MessageHandler(filters.TEXT & ~ filters.COMMAND, login_set_password_handler)]},
-        fallbacks=[CommandHandler('cancel', login_cancel_handler)]
+        fallbacks=[MessageHandler(filters.COMMAND, login_cancel_handler)]
     )
 
     register = ConversationHandler(
@@ -420,6 +446,7 @@ def run_telegram_bot():
     application.add_handler(audio)
     application.add_handler(CallbackQueryHandler(cancel_callback))
     application.add_handler(CommandHandler('logout', logout_handler))
+    application.add_handler(CommandHandler('push', push_message_handler))
     application.add_handler(CommandHandler('help', help_handler))
     application.add_error_handler(error_handler)
     application.run_polling()
