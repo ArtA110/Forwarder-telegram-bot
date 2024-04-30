@@ -13,6 +13,13 @@ from telegram import (InlineQueryResultArticle, InlineQueryResultPhoto, InputTex
 from telegram.ext import (ApplicationBuilder, ContextTypes, InlineQueryHandler, CommandHandler, filters, MessageHandler,
                           ConversationHandler, CallbackQueryHandler)
 
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route("/")
+def hello_world():
+    return "<p>Hello, World!</p>"
 
 settings = open("settings.json", "r") #chage this to open("sample_settings.json", "r") for your test
 settings = json.load(settings)
@@ -23,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 CHANNEL_ID: Final = settings[0]['channel_id']
-TOKEN: Final = '6777553545:AAFmGKGc1mqUORYJh9s4fRRaB4tXd7jJj8c'
+TOKEN: Final = settings[0]['token']
 # Connect to database
 client = MongoClient(settings[0]['mongo_uri'])
 db = client['TelegramBot']
@@ -54,9 +61,12 @@ def run_tcp_server():
             client_socket, _ = server_socket.accept()
             handle_client(client_socket)
 
+def run_flask():
+    app.run(debug=False, host='0.0.0.0')
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = '\n\nبه بات تلگرامی شیخیه باقری خوش آمدید، برای ادامه لطفا یکی از آپشن های زیر را انتخاب کنید.\n\n'
+    text = f'\n\nبه بات تلگرامی {settings[0]["bot_name"]} خوش آمدید، برای ادامه لطفا یکی از آپشن های زیر را انتخاب کنید.\n\n'
     text += '\n\nبرای دیدن لیست کامل دستورات و راهنمایی لطفا برروی /help بزنید\n\n'
     options = ['/login برای ورود به اکانت', '/ticket برای درخواست پشتیبانی']
     text += '\n'.join(options)
@@ -456,5 +466,6 @@ def run_telegram_bot():
 if __name__ == "__main__":
     tcp_server_thread = threading.Thread(target=run_tcp_server)
     tcp_server_thread.start()
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
     run_telegram_bot()
-
