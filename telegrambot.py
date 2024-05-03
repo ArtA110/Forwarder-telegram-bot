@@ -336,6 +336,7 @@ async def register_info_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if len(update.message.text.split(':')) != 2 or update.message.text.split(':')[1] not in ['0', '1']:
             raise Exception('Error - Check your input format')
         username, is_admin = update.message.text.split(':')
+        username = username.lower()
         if users_collection.find_one({'username': username}):
             raise Exception('User already exists')
         users_collection.insert_one({'username': username, 'password': None, 'is_admin': int(is_admin)})
