@@ -386,6 +386,26 @@ async def push_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text='شما حق استفاده از این دستور را ندارید')
 
+
+async def sessions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_admin(update.effective_chat.id):
+        all_users = list(users_collection.find())
+        logged_in_users = list(logged_in_collection.find())
+        logged_in_usernames = []
+
+        context.bot.send_message(chat_id=update.effective_chat.id,
+                                 text='لیست تمامی افراد در زیر آمده، افرادی که لاگین هستند با تیک سبز مشخص شده اند')
+        for lgu in logged_in_users:
+            logged_in_usernames.append(lgu['username'])
+        for user in all_users:
+            if user['username'] in logged_in_usernames:
+                context.bot.send_message(chat_id=update.effective_chat.id, text=user['username']+' ✅')
+            else:
+                context.bot.send_message(chat_id=update.effective_chat.id, text=user['username'])
+    else:
+        context.bot.send_message(chat_id=update.effective_chat.id, text='شما دسترسی به این قابلیت ندارید')
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
     # Log the error before we do anything else, so we can see it even if something breaks.
@@ -460,6 +480,7 @@ def run_telegram_bot():
     application.add_handler(CommandHandler('logout', logout_handler))
     application.add_handler(CommandHandler('push', push_message_handler))
     application.add_handler(CommandHandler('help', help_handler))
+    application.add_handler(CommandHandler('sessions', sessions_handler))
     application.add_error_handler(error_handler)
     application.run_polling()
 
