@@ -88,7 +88,6 @@ async def forward_audio_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not is_authorized(update.effective_chat.id):
         await context.bot.send_message(chat_id=update.effective_chat.id, text='ابتدا باید /login کنید')
         return ConversationHandler.END
-
     all_topics = {'اصول فقه': 'osool', 'تذکره': 'tazkareh', 'دره نجفیه': 'dorre', 'رجوم الشیاطین': 'rojoom',
                   'رساله غیبت': 'gheibat', 'سلطانیه': 'soltanieh', 'شرایط دعا': 'Doa', 'قرآن محشی': 'mohassha',
                   'متفرقه': 'others', 'معادیه': "ma'adieh", 'معرفت سر اختیار': 'marefat', 'منطق': 'mantegh',
@@ -103,69 +102,99 @@ async def forward_audio_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def button1(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
+    query = update.callback_query  # mohassha
     context.user_data['query_item'].append(query.data)
-    search_result = sort_result(list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
-    sub_menu = {}
-    if len(search_result[0]['file_name'].split('-')) > 2:
-        all_topics = {'سوره بقره': 'baghareh', 'سوره حمد': 'hamd', 'سوره اخلاص': 'ekhlas', 'جزء سی': 'jozv30',
-                  'فخر رازی': 'FakhrRazi', 'تفتازانی': 'Taftazani', 'مقدمه': 'moghadame', 'جلد اول': '1',
-                  'جلد دوم': '2', 'سال 1992': '92'}
-        reverse_all_topic = {value: key for key, value in all_topics.items()}
-        for result in search_result:
-            if result['file_name'].split('-')[1].replace('.mp3', '') in all_topics.values():
-                sub_menu[reverse_all_topic[result['file_name'].split('-')[1].replace('.mp3', '')]] = result['file_name'].split('-')[1].replace('.mp3', '')
-    else:
-        for result in search_result:
-            sub_menu[result['title']] = result['file_name']
-    if len(sub_menu) > 100:
-        text = (
-            'به دلیل زیاد بودن مباحث در این بخش لطفا شماره فایل مورد نظر را وارد کنید\n\n مثلا در تذکره شماره 100 به '
-            'معنی فایل صدم میباشد')
-        await query.edit_message_text(text=text)
-        return PAGINATION
+    all_topics = {'baghareh': 'سوره بقره', 'hamd': 'سوره حمد',
+                  'ekhlas': 'سوره اخلاص', 'jozv30': 'جزء سی',
+                  'FakhrRazi': 'فخر رازی', 'Taftazani': 'تفتازانی',
+                  'moghadame': 'مقدمه', '1': 'جلد اول', '2': 'جلد دوم',
+                  '92': 'سال 1992'}
+    reverse_all_topics = {value: key for key, value in all_topics.items()}
+    files = sort_result(
+        list(files_collection.find({'file_name': {'$regex': '-'.join(context.user_data['query_item'])}})))
+    s = list()
+    try:
+        for file in files:
+            s.append(all_topics[file['file_name'].split('-')[1].replace('.mp3', '')])
+        s = set(s)
+        sub_menu = {i: reverse_all_topics[i] for i in s}
+    except:
+        sub_menu = {}
+        for file in files:
+            sub_menu[file['title']] = file['file_name']
+
+        if len(sub_menu) > 100:
+            text = f'تعداد فایل ها زیاد است، لطفا شماره فایل مورد نظر در درس {sub_menu[list(sub_menu.keys())[0]].split("-")[0]} را بگویید'
+            values = list(sub_menu.values())
+            ranges = [int(float(x.split('-')[-1].removesuffix('.mp3'))) for x in values]
+            min_num = min(ranges)
+            max_num = max(ranges)
+            text += f'\n\n این درس از شماره {min_num} تا {max_num} دارد'
+            await query.edit_message_text(text=text)
+            return PAGINATION
+
+        reply_markup = InlineKeyboardMarkup(create_menu(name_dict=sub_menu))
+        await query.edit_message_text(text=f'you choose: {query.data}', reply_markup=reply_markup)
+        return STATE2
+
     reply_markup = InlineKeyboardMarkup(create_menu(name_dict=sub_menu))
     await query.edit_message_text(text=f'you choose: {query.data}', reply_markup=reply_markup)
     return STATE1
 
 
 async def button2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query = update.callback_query  # mohassha-ekhlas
     context.user_data['query_item'].append(query.data)
-    if '.mp3' in query.data:
-        search_result = sort_result(list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
-    else:
-        search_result = sort_result(
-            list(files_collection.find({"file_name": {"$regex": f"^{'-'.join(context.user_data['query_item'])}"}})))
-    if len(search_result) == 1:
-        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=search_result[0]['message_id'])
-        await query.edit_message_text(text='File Sent Successfully')
+
+    files = sort_result(
+        list(files_collection.find({'file_name': {'$regex': '-'.join(context.user_data['query_item'])}})))
+    if await send_file(files, update, context, query):
         return ConversationHandler.END
-    sub_menu = {}
-    for result in search_result:
-        sub_menu[result['title']] = result['file_name']
+    sub_menu = dict()
+    for file in files:
+        sub_menu[file['title']] = file['file_name']
+
+    if len(sub_menu) > 100:
+        text = f'تعداد فایل ها زیاد است، لطفا شماره فایل مورد نظر در درس {sub_menu[list(sub_menu.keys())[0]].split("-")[0]} را بگویید'
+        values = list(sub_menu.values())
+        ranges = [int(float(x.split('-')[-1].removesuffix('.mp3'))) for x in values]
+        min_num = min(ranges)
+        max_num = max(ranges)
+        text += f'\n\n این درس از شماره {min_num} تا {max_num} دارد'
+        await query.edit_message_text(text=text)
+        return PAGINATION
+
     reply_markup = InlineKeyboardMarkup(create_menu(name_dict=sub_menu))
     await query.edit_message_text(text=f'you choose: {query.data}', reply_markup=reply_markup)
     return STATE2
 
 
 async def button3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    search_result = sort_result(
-        list(files_collection.find({"file_name": {"$regex": f"^{query.data}"}})))
-    await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=search_result[0]['message_id'])
-    await query.edit_message_text(text='File Sent Successfully')
+    query = update.callback_query  # mohassha-ekhlas-2
+    context.user_data['query_item'].append(query.data)
+    files = sort_result(list(files_collection.find({'file_name': {'$regex': context.user_data['query_item'][-1]}})))
+    for file in files:
+        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=file['message_id'])
+    await query.edit_message_text(text='فایل با موفقیت ارسال شد')
     return ConversationHandler.END
 
 
+async def send_file(files, update: Update, context: ContextTypes.DEFAULT_TYPE, query):
+    if len(files) == 1:
+        await query.edit_message_text(text='فایل با موفقیت ارسال شد')
+        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=files[0]['message_id'])
+        return True
+    return False
+
+
 async def pagination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file_name = context.user_data['query_item'][-1]+'-'+update.message.text
-    results = files_collection.find({"file_name": {"$regex": f'^{file_name}\.'}})
-    for result in results:
-        print(file_name)
-        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=result['message_id'])
+    file_name = context.user_data['query_item'][-1] + '-' + update.message.text
+    files = list(files_collection.find({"file_name": {"$regex": f'^{file_name}\D'}}))
+    if len(files) == 0:
+        text = 'فایل با این شماره وجود ندارد'
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+    for file in files:
+        await update.effective_chat.forward_from(from_chat_id=CHANNEL_ID, message_id=file['message_id'])
     return ConversationHandler.END
 
 
@@ -363,28 +392,28 @@ async def ticket_info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def push_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_admin(update.effective_chat.id):
-        try:
-            mode = context.args[0]
-            message = update.message.text.split(" ")[2:]
-            message = ' '.join(message)
-        except:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text='bad arguments. try /push <mode> <message>')
-            return
-
-        if mode.lower() == 'public':
-            chats = logged_in_collection.find()
-            for chat in chats:
-                await context.bot.send_message(chat_id=int(chat['chat_id']), text=message)
-        else:
-            try:
-                await context.bot.send_message(chat_id=int(mode), text=message)
-            except:
-                await context.bot.send_message(chat_id=update.effective_chat.id, text='bad chat id.')
-                return
-        await context.bot.send_message(chat_id=update.effective_chat.id, text='Done!')
-    else:
+    if not is_admin(update.effective_chat.id):
         await context.bot.send_message(chat_id=update.effective_chat.id, text='شما حق استفاده از این دستور را ندارید')
+        return
+    try:
+        mode = context.args[0]
+        message = update.message.text.split(" ")[2:]
+        message = ' '.join(message)
+    except:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text='bad arguments. try /push <mode> <message>')
+        return
+
+    if mode.lower() == 'public':
+        chats = logged_in_collection.find()
+        for chat in chats:
+            await context.bot.send_message(chat_id=int(chat['chat_id']), text=message)
+    else:
+        try:
+            await context.bot.send_message(chat_id=int(mode), text=message)
+        except:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text='bad chat id.')
+            return
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='Done!')
 
 
 async def sessions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
