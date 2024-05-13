@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 CHANNEL_ID: Final = settings[0]['channel_id']
-TOKEN: Final = settings[0]['token']
+TOKEN: Final = '6777553545:AAFmGKGc1mqUORYJh9s4fRRaB4tXd7jJj8c'
 # Connect to database
 client = MongoClient(settings[0]['mongo_uri'])
 db = client['TelegramBot']
@@ -204,12 +204,21 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text='نشست شما در این فراخوانی به پایان رسیده لطفا مجددا دستور را وارد '
                                        'کنید')
 
+def do_sort(item):
+    file_name = item.get('file_name')
+    file_name = file_name.split('-')
+    if not file_name[-1].removesuffix('.mp3').isdigit():
+        return 0
+    pos_1, pos_2 = 0, 0
+    pos_1 = int(float(file_name[-1].removesuffix('.mp3')))
+    try:
+        pos_2 = int(file_name.split('-')[-2])
+    except:
+        pass
+    return pos_2*100 + pos_1
 
 def sort_result(result):
-    try:
-        return sorted(result, key=lambda x: int(x['file_name'].split('-')[-1].replace('.mp3', '')))
-    except ValueError:
-        return sorted(result, key=lambda x: x['file_name'].split('-')[-1].replace('.mp3', ''))
+    return sorted(result, key=do_sort)
 
 
 def create_menu(count: int=None, name_dict: dict=None):
@@ -417,22 +426,23 @@ async def push_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def sessions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_admin(update.effective_chat.id):
-        all_users = list(users_collection.find())
-        logged_in_users = list(logged_in_collection.find())
-        logged_in_usernames = []
+    if not is_admin(update.effective_chat.id):
+        await context.bot.send_message(chat_id=update.effective_chat.id, text='شما دسترسی به این قابلیت ندارید')
+    all_users = list(users_collection.find())
+    logged_in_users = list(logged_in_collection.find())
+    logged_in_usernames = []
 
-        context.bot.send_message(chat_id=update.effective_chat.id,
+    await context.bot.send_message(chat_id=update.effective_chat.id,
                                  text='لیست تمامی افراد در زیر آمده، افرادی که لاگین هستند با تیک سبز مشخص شده اند')
-        for lgu in logged_in_users:
-            logged_in_usernames.append(lgu['username'])
-        for user in all_users:
-            if user['username'] in logged_in_usernames:
-                context.bot.send_message(chat_id=update.effective_chat.id, text=user['username']+' ✅')
-            else:
-                context.bot.send_message(chat_id=update.effective_chat.id, text=user['username'])
-    else:
-        context.bot.send_message(chat_id=update.effective_chat.id, text='شما دسترسی به این قابلیت ندارید')
+    for lgu in logged_in_users:
+        logged_in_usernames.append(lgu['username'])
+    result = []
+    for user in all_users:
+        if user['username'] in logged_in_usernames:
+            result.append(user['username']+' ✅')
+        else:
+            result.append(user['username'])
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='\n'.join(result))
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
